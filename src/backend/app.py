@@ -101,77 +101,70 @@ def message_volume():
 @app.route("/message_comparison")
 def message_comparison():
  """
- Displays a Plotly grouped bar chart comparing message counts between
- "unknown" and a specified sender within a conversation.
+ Displays a Plotly pie chart comparing the proportion of messages
+ sent by "self" and "unknown" within a conversation and date range.
  """
 db = SessionLocal()
  conversation_username = request.args.get("conversation_username")
+ start_date_str = request.args.get("start_date")
+ end_date_str = request.args.get("end_date")
+
  if not conversation_username:
  return (
- "Please provide 'conversation_username' parameter.",
+ "Please provide 'conversation_username', 'start_date', and 'end_date' parameters.",
  400,
  )
 
  try:
- # Query for messages sent by "unknown" in the specified conversation
- unknown_messages = (
- db.query(
- func.strftime("%Y-%m", Message.timestamp_iso).label("month"),
- func.count().label("message_count"),
+ # Base query filtered by conversation and date range
+ query = db.query(Message).filter(
+ Message.conversation_username == conversation_username
  )
- .filter(
- Message.conversation_username == conversation_username,
- Message.sender == "unknown",
- )
- .group_by("month")
- .all()
- )
+ if start_date_str:
+ query = query.filter(Message.timestamp_iso >= start_date_str)
+ if end_date_str:
+ query = query.filter(Message.timestamp_iso <= end_date_str)
 
- # Query for messages sent by the conversation_username in the same conversation
- sender_messages = (
- db.query(
- func.strftime("%Y-%m", Message.timestamp_iso).label("month"),
- func.count().label("message_count"),
- )
- .filter(
- Message.conversation_username == conversation_username,
- Message.sender == conversation_username,
- )
- .group_by("month")
- .all()
- )
+ # Count messages for "self" and "unknown"
+ self_count = query.filter(Message.sender == "self").count()
+ unknown_count = query.filter(Message.sender == "unknown").count()
 
- # Convert results to DataFrames
- df_unknown = pd.DataFrame(unknown_messages, columns=["month", "message_count"])
- df_sender = pd.DataFrame(sender_messages, columns=["month", "message_count"])
+ total_messages = self_count + unknown_count
 
- # Merge the two dataframes
- df_comparison = pd.merge(
- df_unknown,
- df_sender,
- on="month",
- how="outer",
- suffixes=("_unknown", "_sender"),
- ).fillna(0)
+ if total_messages == 0:
+ return "No messages found for the specified criteria.", 404
 
- # Convert month to datetime and sort
- df_comparison["month"] = pd.to_datetime(df_comparison["month"])
- df_comparison = df_comparison.sort_values("month")
+ labels = ["Self", "Unknown"]
+ values = [self_count, unknown_count]
 
- # Create a grouped bar chart using go
+ # Create a pie chart
  fig = go.Figure(
  data=[
- go.Bar(
- name="unknown",
- x=df_comparison["month"],
- y=df_comparison["message_count_unknown"],
- ),
- go.Bar( # Comparing with conversation_username's messages
- name=sender,
- x=df_comparison["month"],
- y=df_comparison["message_count_sender"],
+ go.Pie(
+ labels=labels,
+ values=values,
+ hoverinfo="label+percent",
+ textinfo="value",
+ insidetextorientation="radial",
  ),
  ]
+ )
+
+ # Update layout
+ fig.update_layout(
+ title=f'Message Proportion for "{conversation_username}"<br>({start_date_str} to {end_date_str})',
+ )
+
+ # Convert to HTML
+ graph_html = pio.to_html(fig, full_html=False)
+
+ return render_template_string(
+ """
+ <h1>Message Proportion Analysis</h1>
+ <p>Analyzing messages in conversation "{{ conversation_username }}" from {{ start_date }} to {{ end_date }}.</p>
+ <div>
+ {{ graph_html | safe }}
+ </div>
  )
 
  fig.update_layout(
@@ -186,14 +179,11 @@ db = SessionLocal()
  return render_template_string(
  """
  <h1>Message Comparison Analysis</h1>
- <p>Comparing messages sent by "unknown" and "{{ sender }}" in conversation "{{ conversation_username }}".</p>
- <p>Comparing messages sent by "unknown" and the conversation user ({{ conversation_username }}) in conversation "{{ conversation_username }}".</p>
- <div>
- {{ graph_html | safe }}
- </div>
- """,
+ """, # Remove the previous template
  graph_html=graph_html,
  conversation_username=conversation_username,
+ start_date=start_date_str,
+ end_date=end_date_str,
  )
 
  except Exception as e:
