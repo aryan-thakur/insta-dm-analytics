@@ -57,7 +57,7 @@ def message_volume():
             func.count().label("message_count"),
         ).group_by("month")
 
- if username_filter and username_filter != "all":
+        if username_filter and username_filter != "all":
             query = query.filter(Message.conversation_username == username_filter)
 
         results = query.all()
@@ -104,12 +104,12 @@ def message_comparison():
     Displays a Plotly pie chart comparing the proportion of messages
     sent by "self" and "unknown" within a conversation and date range.
     """
- db = SessionLocal()
-    conversation_username = request.args.get("conversation_username")
+    db = SessionLocal()
+    conversation_username = request.args.get("username")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
 
-    if not username:
+    if not conversation_username:
         return (
             "Please provide 'username', 'start_date', and 'end_date' parameters.",
             400,
@@ -117,8 +117,10 @@ def message_comparison():
 
     try:
         # Base query filtered by conversation and date range
- if conversation_username and conversation_username != "all":
-            query = db.query(Message).filter(Message.conversation_username == conversation_username)
+        # Initialize base query
+        query = db.query(Message)
+        if conversation_username and conversation_username != "all":
+            query = query.filter(Message.conversation_username == conversation_username)
         if start_date_str:
             query = query.filter(Message.timestamp_iso >= start_date_str)
         if end_date_str:
@@ -151,7 +153,7 @@ def message_comparison():
 
         # Update layout
         fig.update_layout(
- title=f'Message Proportion for "{conversation_username if conversation_username != "all" else "All Conversations"}"<br>({start_date_str} to {end_date_str})',
+            title=f'Message Proportion for "{conversation_username if conversation_username != "all" else "All Conversations"}"<br>({start_date_str} to {end_date_str})',
         )
 
         # Convert to HTML
@@ -166,7 +168,7 @@ def message_comparison():
  </div>
             """,
             graph_html=graph_html,
-            username=username,
+            username=conversation_username,
             start_date=start_date_str,
             end_date=end_date_str,
         )
