@@ -1,0 +1,8 @@
+# Ignore database files
+dm_data.db
+
+# Ignore all contents in the data directory
+data/
+
+# MacOS junk files (optional, but common)
+.DS_Store

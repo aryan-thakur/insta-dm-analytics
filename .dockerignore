@@ -1,0 +1,17 @@
+# instagram_analyzer/.dockerignore
+
+.git
+.vscode
+__pycache__
+*.pyc
+.env
+*.db      # Don't copy database files into the *image* itself
+*.sqlite3 # Don't copy database files into the *image* itself
+venv/
+*.log
+*.html    # Usually don't want large data files in the image, mount them via volumes
+# Add any other files/dirs you want to exclude
+data/**/photos
+data/**/photos/*
+data/**/videos
+data/**/videos/*
