@@ -57,7 +57,7 @@ def message_volume():
             func.count().label("message_count"),
         ).group_by("month")
 
-        if username_filter:
+ if username_filter and username_filter != "all":
             query = query.filter(Message.conversation_username == username_filter)
 
         results = query.all()
@@ -104,8 +104,8 @@ def message_comparison():
     Displays a Plotly pie chart comparing the proportion of messages
     sent by "self" and "unknown" within a conversation and date range.
     """
-    db = SessionLocal()
-    username = request.args.get("username")
+ db = SessionLocal()
+    conversation_username = request.args.get("conversation_username")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
 
@@ -117,7 +117,8 @@ def message_comparison():
 
     try:
         # Base query filtered by conversation and date range
-        query = db.query(Message).filter(Message.conversation_username == username)
+ if conversation_username and conversation_username != "all":
+            query = db.query(Message).filter(Message.conversation_username == conversation_username)
         if start_date_str:
             query = query.filter(Message.timestamp_iso >= start_date_str)
         if end_date_str:
@@ -150,7 +151,7 @@ def message_comparison():
 
         # Update layout
         fig.update_layout(
-            title=f'Message Proportion for "{username}"<br>({start_date_str} to {end_date_str})',
+ title=f'Message Proportion for "{conversation_username if conversation_username != "all" else "All Conversations"}"<br>({start_date_str} to {end_date_str})',
         )
 
         # Convert to HTML
@@ -160,9 +161,9 @@ def message_comparison():
             """
             <h1>Message Proportion Analysis</h1>
             <p>Analyzing messages in conversation "{{ username }}" from {{ start_date }} to {{ end_date }}.</p>
-            <div>
+ <div>
             {{ graph_html | safe }}
-            </div>
+ </div>
             """,
             graph_html=graph_html,
             username=username,
