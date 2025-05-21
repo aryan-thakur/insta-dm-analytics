@@ -98,6 +98,110 @@ def message_volume():
         db.close()
 
 
+@app.route("/message_comparison")
+def message_comparison():
+ """
+ Displays a Plotly grouped bar chart comparing message counts between
+ "unknown" and a specified sender within a conversation.
+ """
+db = SessionLocal()
+ conversation_username = request.args.get("conversation_username")
+ if not conversation_username:
+ return (
+ "Please provide 'conversation_username' parameter.",
+ 400,
+ )
+
+ try:
+ # Query for messages sent by "unknown" in the specified conversation
+ unknown_messages = (
+ db.query(
+ func.strftime("%Y-%m", Message.timestamp_iso).label("month"),
+ func.count().label("message_count"),
+ )
+ .filter(
+ Message.conversation_username == conversation_username,
+ Message.sender == "unknown",
+ )
+ .group_by("month")
+ .all()
+ )
+
+ # Query for messages sent by the conversation_username in the same conversation
+ sender_messages = (
+ db.query(
+ func.strftime("%Y-%m", Message.timestamp_iso).label("month"),
+ func.count().label("message_count"),
+ )
+ .filter(
+ Message.conversation_username == conversation_username,
+ Message.sender == conversation_username,
+ )
+ .group_by("month")
+ .all()
+ )
+
+ # Convert results to DataFrames
+ df_unknown = pd.DataFrame(unknown_messages, columns=["month", "message_count"])
+ df_sender = pd.DataFrame(sender_messages, columns=["month", "message_count"])
+
+ # Merge the two dataframes
+ df_comparison = pd.merge(
+ df_unknown,
+ df_sender,
+ on="month",
+ how="outer",
+ suffixes=("_unknown", "_sender"),
+ ).fillna(0)
+
+ # Convert month to datetime and sort
+ df_comparison["month"] = pd.to_datetime(df_comparison["month"])
+ df_comparison = df_comparison.sort_values("month")
+
+ # Create a grouped bar chart using go
+ fig = go.Figure(
+ data=[
+ go.Bar(
+ name="unknown",
+ x=df_comparison["month"],
+ y=df_comparison["message_count_unknown"],
+ ),
+ go.Bar( # Comparing with conversation_username's messages
+ name=sender,
+ x=df_comparison["month"],
+ y=df_comparison["message_count_sender"],
+ ),
+ ]
+ )
+
+ fig.update_layout(
+ barmode="group",
+ title=f'Message Comparison for "{conversation_username}" (unknown vs conversation username)',
+ xaxis_title="Month",
+ yaxis_title="Number of Messages",
+ )
+
+ graph_html = pio.to_html(fig, full_html=False)
+
+ return render_template_string(
+ """
+ <h1>Message Comparison Analysis</h1>
+ <p>Comparing messages sent by "unknown" and "{{ sender }}" in conversation "{{ conversation_username }}".</p>
+ <p>Comparing messages sent by "unknown" and the conversation user ({{ conversation_username }}) in conversation "{{ conversation_username }}".</p>
+ <div>
+ {{ graph_html | safe }}
+ </div>
+ """,
+ graph_html=graph_html,
+ conversation_username=conversation_username,
+ )
+
+ except Exception as e:
+ return f"An error occurred: {e}", 500
+ finally:
+ db.close()
+
+
 if __name__ == "__main__":
     # You can run this simple app using `python your_file_name.py`
     # It will be accessible at http://127.0.0.1:5000/message_volume
