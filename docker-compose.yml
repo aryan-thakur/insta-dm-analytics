@@ -3,6 +3,8 @@ version: "3.8" # Specify Compose file version
 services:
   app: # Define a service named 'app'
     build: . # Build the image using the Dockerfile in the current directory (.)
+    ports: # Map port 5000 on the host to port 5000 in the container
+      - "5234:5234"
     env_file:
       - .env
     container_name: instagram_analyzer_app # Give the container a specific name

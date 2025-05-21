@@ -25,7 +25,7 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
-    conversation_username = Column(Text)
+    username = Column(Text)
     sender = Column(Text)
     message = Column(Text)
     timestamp = Column(DateTime)
@@ -58,7 +58,7 @@ def message_volume():
         ).group_by("month")
 
         if username_filter:
-            query = query.filter(Message.conversation_username == username_filter)
+            query = query.filter(Message.username == username_filter)
 
         results = query.all()
 
@@ -100,96 +100,80 @@ def message_volume():
 
 @app.route("/message_comparison")
 def message_comparison():
- """
- Displays a Plotly pie chart comparing the proportion of messages
- sent by "self" and "unknown" within a conversation and date range.
- """
-db = SessionLocal()
- conversation_username = request.args.get("conversation_username")
- start_date_str = request.args.get("start_date")
- end_date_str = request.args.get("end_date")
+    """
+    Displays a Plotly pie chart comparing the proportion of messages
+    sent by "self" and "unknown" within a conversation and date range.
+    """
+    db = SessionLocal()
+    username = request.args.get("username")
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
 
- if not conversation_username:
- return (
- "Please provide 'conversation_username', 'start_date', and 'end_date' parameters.",
- 400,
- )
+    if not username:
+        return (
+            "Please provide 'username', 'start_date', and 'end_date' parameters.",
+            400,
+        )
 
- try:
- # Base query filtered by conversation and date range
- query = db.query(Message).filter(
- Message.conversation_username == conversation_username
- )
- if start_date_str:
- query = query.filter(Message.timestamp_iso >= start_date_str)
- if end_date_str:
- query = query.filter(Message.timestamp_iso <= end_date_str)
+    try:
+        # Base query filtered by conversation and date range
+        query = db.query(Message).filter(Message.username == username)
+        if start_date_str:
+            query = query.filter(Message.timestamp_iso >= start_date_str)
+        if end_date_str:
+            query = query.filter(Message.timestamp_iso <= end_date_str)
 
- # Count messages for "self" and "unknown"
- self_count = query.filter(Message.sender == "self").count()
- unknown_count = query.filter(Message.sender == "unknown").count()
+        # Count messages for "self" and "unknown"
+        self_count = query.filter(Message.sender == "self").count()
+        unknown_count = query.filter(Message.sender == "unknown").count()
 
- total_messages = self_count + unknown_count
+        total_messages = self_count + unknown_count
 
- if total_messages == 0:
- return "No messages found for the specified criteria.", 404
+        if total_messages == 0:
+            return "No messages found for the specified criteria.", 404
 
- labels = ["Self", "Unknown"]
- values = [self_count, unknown_count]
+        labels = ["Self", "Unknown"]
+        values = [self_count, unknown_count]
 
- # Create a pie chart
- fig = go.Figure(
- data=[
- go.Pie(
- labels=labels,
- values=values,
- hoverinfo="label+percent",
- textinfo="value",
- insidetextorientation="radial",
- ),
- ]
- )
+        # Create a pie chart
+        fig = go.Figure(
+            data=[
+                go.Pie(
+                    labels=labels,
+                    values=values,
+                    hoverinfo="label+percent",
+                    textinfo="value",
+                    insidetextorientation="radial",
+                ),
+            ]
+        )
 
- # Update layout
- fig.update_layout(
- title=f'Message Proportion for "{conversation_username}"<br>({start_date_str} to {end_date_str})',
- )
+        # Update layout
+        fig.update_layout(
+            title=f'Message Proportion for "{username}"<br>({start_date_str} to {end_date_str})',
+        )
 
- # Convert to HTML
- graph_html = pio.to_html(fig, full_html=False)
+        # Convert to HTML
+        graph_html = pio.to_html(fig, full_html=False)
 
- return render_template_string(
- """
- <h1>Message Proportion Analysis</h1>
- <p>Analyzing messages in conversation "{{ conversation_username }}" from {{ start_date }} to {{ end_date }}.</p>
- <div>
- {{ graph_html | safe }}
- </div>
- )
+        return render_template_string(
+            """
+            <h1>Message Proportion Analysis</h1>
+            <p>Analyzing messages in conversation "{{ username }}" from {{ start_date }} to {{ end_date }}.</p>
+            <div>
+            {{ graph_html | safe }}
+            </div>
+            """,
+            graph_html=graph_html,
+            username=username,
+            start_date=start_date_str,
+            end_date=end_date_str,
+        )
 
- fig.update_layout(
- barmode="group",
- title=f'Message Comparison for "{conversation_username}" (unknown vs conversation username)',
- xaxis_title="Month",
- yaxis_title="Number of Messages",
- )
-
- graph_html = pio.to_html(fig, full_html=False)
-
- return render_template_string(
- """
- <h1>Message Comparison Analysis</h1>
- """, # Remove the previous template
- graph_html=graph_html,
- conversation_username=conversation_username,
- start_date=start_date_str,
- end_date=end_date_str,
- )
-
- except Exception as e:
- return f"An error occurred: {e}", 500
- finally:
- db.close()
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

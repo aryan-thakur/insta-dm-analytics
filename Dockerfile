@@ -20,7 +20,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 6. (Optional) Expose port if you were running a web server (e.g., Flask, Jupyter)
-# EXPOSE 8888
+EXPOSE 5234
 
 # 7. Default command (optional): What runs when the container starts *if not overridden*
 #    For development, it's often better to override this in docker-compose.yml
