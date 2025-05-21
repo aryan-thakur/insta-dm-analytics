@@ -179,6 +179,89 @@ def message_comparison():
         db.close()
 
 
+@app.route("/average_response_time")
+def average_response_time():
+    """
+    Calculates and displays the average response time for a given conversation and date.
+    """
+    db = SessionLocal()
+    conversation_username = request.args.get("conversation_username")
+    date_str = request.args.get("date")
+
+    if not conversation_username or not date_str:
+        return (
+            "Please provide 'conversation_username' and 'date' parameters.",
+            400,
+        )
+
+    try:
+        # Filter messages by conversation and date, ordered by timestamp
+        messages = (
+            db.query(Message)
+            .filter(
+                Message.conversation_username == conversation_username,
+                func.strftime("%Y-%m-%d", Message.timestamp_iso) == date_str,
+            )
+            .order_by(Message.timestamp_iso)
+            .all()
+        )
+
+        if not messages:
+            return "No messages found for the specified criteria.", 404
+
+        self_to_unknown_times = []
+        unknown_to_self_times = []
+        last_sender = None
+        last_timestamp = None
+
+        for message in messages:
+            current_sender = message.sender
+            current_timestamp = pd.to_datetime(message.timestamp_iso)
+
+            if last_sender is not None and last_sender != current_sender:
+                time_diff = (current_timestamp - last_timestamp).total_seconds()
+                if last_sender == "self" and current_sender == "unknown":
+                    self_to_unknown_times.append(time_diff)
+                elif last_sender == "unknown" and current_sender == "self":
+                    unknown_to_self_times.append(time_diff)
+
+            last_sender = current_sender
+            last_timestamp = current_timestamp
+
+        avg_self_to_unknown = (
+            sum(self_to_unknown_times) / len(self_to_unknown_times)
+            if self_to_unknown_times
+            else 0
+        )
+        avg_unknown_to_self = (
+            sum(unknown_to_self_times) / len(unknown_to_self_times)
+            if unknown_to_self_times
+            else 0
+        )
+
+        return render_template_string(
+            """
+            <h1>Average Response Time Analysis</h1>
+            <p>Analyzing response times in conversation "{{ conversation_username }}" on {{ date }}.</p>
+            <ul>
+                <li>Average Self to Unknown Response Time: {{ avg_self_to_unknown:.2f }} seconds</li>
+                <li>Average Unknown to Self Response Time: {{ avg_unknown_to_self:.2f }} seconds</li>
+            </ul>
+            """,
+            conversation_username=conversation_username,
+            date=date_str,
+            avg_self_to_unknown=avg_self_to_unknown,
+            avg_unknown_to_self=avg_unknown_to_self,
+        )
+
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+    finally:
+        db.close()
+
+
+
+
 if __name__ == "__main__":
     # You can run this simple app using `python your_file_name.py`
     # It will be accessible at http://127.0.0.1:5000/message_volume
