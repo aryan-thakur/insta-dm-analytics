@@ -25,7 +25,7 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(Text)
+    conversation_username = Column(Text)
     sender = Column(Text)
     message = Column(Text)
     timestamp = Column(DateTime)
@@ -58,7 +58,7 @@ def message_volume():
         ).group_by("month")
 
         if username_filter:
-            query = query.filter(Message.username == username_filter)
+            query = query.filter(Message.conversation_username == username_filter)
 
         results = query.all()
 
@@ -117,7 +117,7 @@ def message_comparison():
 
     try:
         # Base query filtered by conversation and date range
-        query = db.query(Message).filter(Message.username == username)
+        query = db.query(Message).filter(Message.conversation_username == username)
         if start_date_str:
             query = query.filter(Message.timestamp_iso >= start_date_str)
         if end_date_str:
