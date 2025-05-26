@@ -5,6 +5,7 @@ from sqlalchemy import func
 import plotly.graph_objs as go
 import plotly.io as pio
 import pandas as pd
+from collections import Counter
 from backend.config import SessionLocal
 from backend.models import Message
 
@@ -60,6 +61,168 @@ def message_volume():
         """,
             graph_html=graph_html,
             username=username_filter,
+        )
+
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+    finally:
+        db.close()
+
+
+@v1.route("/word_cloud")
+def word_cloud():
+    """
+    Analyzes messages for a given username and date range to find the most frequent words.
+    """
+    db = SessionLocal()
+    username = request.args.get("username")
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+
+    if not username or not start_date_str or not end_date_str:
+        return (
+            "Please provide 'username', 'start_date', and 'end_date' parameters.",
+            400,
+        )
+
+    try:
+        # Base query filtered by conversation and date range
+        query = db.query(Message.message).filter(
+            Message.conversation_username == username,
+            Message.timestamp_iso_dt >= start_date_str,
+            Message.timestamp_iso_dt <= end_date_str,
+        )
+        messages = query.all()
+
+        if not messages:
+            return jsonify({"top_words": []})
+
+        # Combine all messages into a single string
+        all_messages_text = " ".join([m[0] for m in messages if m[0]])
+
+        # Simple tokenization and lowercasing
+        words = all_messages_text.lower().split()
+
+        # Define common English stop words (can be expanded)
+        stop_words = set([
+            "the", "a", "an", "is", "it", "in", "on", "at", "for", "with",
+            "and", "or", "but", "not", "i", "you", "he", "she", "it", "we",
+            "they", "my", "your", "his", "her", "its", "our", "their", "to",
+            "of", "from", "by", "as", "so", "that", "this", "these", "those",
+            "be", "am", "are", "was", "were", "been", "have", "has", "had",
+            "do", "does", "did", "can", "could", "will", "would", "get", "like"
+        ])
+
+        # Filter out stop words and punctuation
+        filtered_words = [word for word in words if word not in stop_words and word.isalnum()]
+
+        # Count word frequencies
+        word_counts = Counter(filtered_words)
+
+        # Get the top 5 most frequent words
+        top_words = word_counts.most_common(5)
+
+        return jsonify({"top_words": [{"word": word, "count": count} for word, count in top_words]})
+
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+    finally:
+        db.close()
+
+
+@v1.route("/message_volume_by_period")
+def message_volume_by_period():
+    """
+    Calculates and displays the message volume by time period for a given
+    username and date range.
+    """
+    db = SessionLocal()
+    username_filter = request.args.get("username")
+    start_date_str = request.args.get("start_date")
+    end_date_str = request.args.get("end_date")
+
+    if not username_filter or not start_date_str or not end_date_str:
+        return (
+            "Please provide 'username', 'start_date', and 'end_date' parameters.",
+            400,
+        )
+
+    try:
+        # Filter messages by username and date range
+        query = db.query(Message).filter(
+            Message.conversation_username == username_filter,
+            Message.timestamp_iso_dt >= start_date_str,
+            Message.timestamp_iso_dt <= end_date_str,
+        )
+        messages = query.all()
+
+        # Initialize volume counts for each period and sender
+        volume_by_period = {
+            "12 AM - 6 AM": {"self": 0, "unknown": 0, "total": 0},
+            "6 AM - 12 PM": {"self": 0, "unknown": 0, "total": 0},
+            "12 PM - 6 PM": {"self": 0, "unknown": 0, "total": 0},
+            "6 PM - 12 AM": {"self": 0, "unknown": 0, "total": 0},
+        }
+
+        for message in messages:
+            try:
+                timestamp = datetime.fromisoformat(message.timestamp_iso_dt)
+                hour = timestamp.hour
+                sender = message.sender
+
+                if 0 <= hour < 6:
+                    period = "12 AM - 6 AM"
+                elif 6 <= hour < 12:
+                    period = "6 AM - 12 PM"
+                elif 12 <= hour < 18:
+                    period = "12 PM - 6 PM"
+                elif 18 <= hour < 24:
+                    period = "6 PM - 12 AM"
+                else:
+                    continue  # Should not happen
+
+                volume_by_period[period]["total"] += 1
+                if sender in volume_by_period[period]:
+                    volume_by_period[period][sender] += 1
+
+            except Exception:
+                # Skip messages with invalid timestamps
+                continue
+
+        # Prepare data for Plotly chart
+        periods = list(volume_by_period.keys())
+        self_volumes = [volume_by_period[p]["self"] for p in periods]
+        unknown_volumes = [volume_by_period[p]["unknown"] for p in periods]
+
+        fig = go.Figure(
+            data=[
+                go.Bar(name="Self", x=periods, y=self_volumes),
+                go.Bar(name="Unknown", x=periods, y=unknown_volumes),
+            ]
+        )
+        fig.update_layout(
+            barmode="group",
+            title=f'Message Volume by Period for "{username_filter}"<br>({start_date_str} to {end_date_str})',
+            xaxis_title="Time Period",
+            yaxis_title="Number of Messages",
+        )
+
+        graph_html = pio.to_html(fig, full_html=False)
+
+        return render_template_string(
+            """
+            <h1>Message Volume by Period Analysis</h1>
+            <p>Analyzing messages for username "{{ username }}" from {{ start_date }} to {{ end_date }}.</p>
+            <div>
+                {{ graph_html | safe }}
+            </div>
+            <pre>{{ volume_data | tojson(indent=2) }}</pre>
+            """,
+            graph_html=graph_html,
+            username=username_filter,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            volume_data=volume_by_period,
         )
 
     except Exception as e:
