@@ -8,6 +8,7 @@ import pandas as pd
 from collections import Counter
 from backend.config import SessionLocal
 from backend.models import Message
+from sqlalchemy import or_, and_
 
 v1 = Blueprint("v1", __name__)
 
@@ -92,6 +93,15 @@ def word_cloud():
             Message.timestamp_iso_dt >= start_date_str,
             Message.timestamp_iso_dt <= end_date_str,
         )
+        # Exclude messages that are reactions, have attachments, or are audio/photo/video
+        query = query.filter(
+            ~Message.message.like("Reacted % to your message"),
+            or_(Message.attachment.is_(None), Message.attachment != 1),
+            or_(Message.audio.is_(False), Message.audio.is_(None)),
+            or_(Message.photo.is_(False), Message.photo.is_(None)),
+            or_(Message.video.is_(False), Message.video.is_(None)),
+        )
+
         messages = query.all()
 
         if not messages:
@@ -104,17 +114,74 @@ def word_cloud():
         words = all_messages_text.lower().split()
 
         # Define common English stop words (can be expanded)
-        stop_words = set([
-            "the", "a", "an", "is", "it", "in", "on", "at", "for", "with",
-            "and", "or", "but", "not", "i", "you", "he", "she", "it", "we",
-            "they", "my", "your", "his", "her", "its", "our", "their", "to",
-            "of", "from", "by", "as", "so", "that", "this", "these", "those",
-            "be", "am", "are", "was", "were", "been", "have", "has", "had",
-            "do", "does", "did", "can", "could", "will", "would", "get", "like"
-        ])
+        stop_words = set(
+            [
+                "the",
+                "a",
+                "an",
+                "is",
+                "it",
+                "in",
+                "on",
+                "at",
+                "for",
+                "with",
+                "and",
+                "or",
+                "but",
+                "not",
+                "i",
+                "you",
+                "he",
+                "reacted",
+                "message",
+                "sent",
+                "she",
+                "it",
+                "we",
+                "they",
+                "my",
+                "your",
+                "his",
+                "her",
+                "its",
+                "our",
+                "their",
+                "to",
+                "of",
+                "from",
+                "by",
+                "as",
+                "so",
+                "that",
+                "this",
+                "these",
+                "those",
+                "be",
+                "am",
+                "are",
+                "was",
+                "were",
+                "been",
+                "have",
+                "has",
+                "had",
+                "do",
+                "does",
+                "did",
+                "can",
+                "could",
+                "will",
+                "would",
+                "get",
+                "like",
+            ]
+        )
 
         # Filter out stop words and punctuation
-        filtered_words = [word for word in words if word not in stop_words and word.isalnum()]
+        filtered_words = [
+            word for word in words if word not in stop_words and word.isalnum()
+        ]
 
         # Count word frequencies
         word_counts = Counter(filtered_words)
@@ -122,7 +189,9 @@ def word_cloud():
         # Get the top 5 most frequent words
         top_words = word_counts.most_common(5)
 
-        return jsonify({"top_words": [{"word": word, "count": count} for word, count in top_words]})
+        return jsonify(
+            {"top_words": [{"word": word, "count": count} for word, count in top_words]}
+        )
 
     except Exception as e:
         return f"An error occurred: {e}", 500
@@ -148,8 +217,8 @@ def message_volume_by_period():
         )
 
     try:
-        # Filter messages by username and date range
-        query = db.query(Message).filter(
+        # Query only the columns we actually use: timestamp_iso_dt and sender
+        query = db.query(Message.timestamp_iso_dt, Message.sender).filter(
             Message.conversation_username == username_filter,
             Message.timestamp_iso_dt >= start_date_str,
             Message.timestamp_iso_dt <= end_date_str,
