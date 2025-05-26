@@ -1,7 +1,9 @@
-from flask import Flask, render_template_string, request
+from datetime import datetime
+import statistics
+from flask import Flask, render_template_string, request, jsonify
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, Text, DateTime, Boolean
+from sqlalchemy import Column, Integer, Text, DateTime, Boolean, String
 import plotly.graph_objs as go
 import plotly.io as pio
 import pandas as pd
@@ -28,8 +30,7 @@ class Message(Base):
     conversation_username = Column(Text)
     sender = Column(Text)
     message = Column(Text)
-    timestamp = Column(DateTime)
-    timestamp_iso = Column(Text)  # Add the timestamp_iso column
+    timestamp_iso_dt = Column(String)  # Add the timestamp_iso column
     story_reply = Column(Text)
     liked = Column(Boolean)
     timestamp_liked = Column(DateTime)
@@ -51,7 +52,7 @@ def message_volume():
 
     try:
         query = db.query(
-            func.strftime("%Y-%m", Message.timestamp_iso).label(
+            func.strftime("%Y-%m", Message.timestamp_iso_dt).label(
                 "month"
             ),  # Use timestamp_iso
             func.count().label("message_count"),
@@ -122,9 +123,9 @@ def message_comparison():
         if conversation_username and conversation_username != "all":
             query = query.filter(Message.conversation_username == conversation_username)
         if start_date_str:
-            query = query.filter(Message.timestamp_iso >= start_date_str)
+            query = query.filter(Message.timestamp_iso_dt >= start_date_str)
         if end_date_str:
-            query = query.filter(Message.timestamp_iso <= end_date_str)
+            query = query.filter(Message.timestamp_iso_dt <= end_date_str)
 
         # Count messages for "self" and "unknown"
         self_count = query.filter(Message.sender == "self").count()
@@ -184,82 +185,97 @@ def average_response_time():
     """
     Calculates and displays the average response time for a given conversation and date.
     """
+    # Get query parameters
+    conversation_username = request.args.get("username")
+    start_str = request.args.get("start_date")
+    end_str = request.args.get("end_date")
+
+    start_dt = start_str if start_str else "Start date not provided"
+    end_dt = end_str if end_str else "End date not provided"
+
+    if not conversation_username or not start_str or not end_str:
+        return "Missing required query parameters", 400
+
     db = SessionLocal()
-    conversation_username = request.args.get("conversation_username")
-    date_str = request.args.get("date")
-
-    if not conversation_username or not date_str:
-        return (
-            "Please provide 'conversation_username' and 'date' parameters.",
-            400,
-        )
-
     try:
-        # Filter messages by conversation and date, ordered by timestamp
+        # Compare as strings because the column is String
         messages = (
-            db.query(Message)
+            db.query(Message.timestamp_iso_dt, Message.sender)
             .filter(
                 Message.conversation_username == conversation_username,
-                func.strftime("%Y-%m-%d", Message.timestamp_iso) == date_str,
+                Message.timestamp_iso_dt >= start_str,
+                Message.timestamp_iso_dt <= end_str,
             )
-            .order_by(Message.timestamp_iso)
+            .order_by(Message.timestamp_iso_dt)
             .all()
         )
 
-        if not messages:
-            return "No messages found for the specified criteria.", 404
+        prev_sender = None
+        prev_time = None
+        response_durations = {"self": [], "unknown": []}
 
-        self_to_unknown_times = []
-        unknown_to_self_times = []
-        last_sender = None
-        last_timestamp = None
+        for ts, sender in messages:
+            if ts is None or sender is None:
+                continue
+            try:
+                cur_time = datetime.fromisoformat(ts)
+            except Exception:
+                continue
 
-        for message in messages:
-            current_sender = message.sender
-            current_timestamp = pd.to_datetime(message.timestamp_iso)
+            if prev_sender and prev_sender != sender:
+                delta = (cur_time - prev_time).total_seconds()
+                response_durations[sender].append(delta)
+            prev_sender = sender
+            prev_time = cur_time
 
-            if last_sender is not None and last_sender != current_sender:
-                time_diff = (current_timestamp - last_timestamp).total_seconds()
-                if last_sender == "self" and current_sender == "unknown":
-                    self_to_unknown_times.append(time_diff)
-                elif last_sender == "unknown" and current_sender == "self":
-                    unknown_to_self_times.append(time_diff)
+        MAX_SECONDS = 86400  # 1 day
 
-            last_sender = current_sender
-            last_timestamp = current_timestamp
+        # Filter out values > 1 day for average calculation
+        filtered_self = [d for d in response_durations["self"] if d <= MAX_SECONDS]
+        filtered_unknown = [
+            d for d in response_durations["unknown"] if d <= MAX_SECONDS
+        ]
 
-        avg_self_to_unknown = (
-            sum(self_to_unknown_times) / len(self_to_unknown_times)
-            if self_to_unknown_times
-            else 0
+        # Median includes all values
+        median_self = (
+            statistics.median(response_durations["self"])
+            if response_durations["self"]
+            else None
         )
-        avg_unknown_to_self = (
-            sum(unknown_to_self_times) / len(unknown_to_self_times)
-            if unknown_to_self_times
-            else 0
+        median_unknown = (
+            statistics.median(response_durations["unknown"])
+            if response_durations["unknown"]
+            else None
         )
 
-        return render_template_string(
-            """
-            <h1>Average Response Time Analysis</h1>
-            <p>Analyzing response times in conversation "{{ conversation_username }}" on {{ date }}.</p>
-            <ul>
-                <li>Average Self to Unknown Response Time: {{ avg_self_to_unknown:.2f }} seconds</li>
-                <li>Average Unknown to Self Response Time: {{ avg_unknown_to_self:.2f }} seconds</li>
-            </ul>
-            """,
-            conversation_username=conversation_username,
-            date=date_str,
-            avg_self_to_unknown=avg_self_to_unknown,
-            avg_unknown_to_self=avg_unknown_to_self,
+        # Average (mean), excluding outliers
+        avg_self = sum(filtered_self) / len(filtered_self) if filtered_self else None
+        avg_unknown = (
+            sum(filtered_unknown) / len(filtered_unknown) if filtered_unknown else None
+        )
+
+        return jsonify(
+            {
+                "conversation_username": conversation_username,
+                "start_dt": start_dt,
+                "end_dt": end_dt,
+                "avg_self": round(avg_self, 2) if avg_self is not None else None,
+                "median_self": (
+                    round(median_self, 2) if median_self is not None else None
+                ),
+                "avg_unknown": (
+                    round(avg_unknown, 2) if avg_unknown is not None else None
+                ),
+                "median_unknown": (
+                    round(median_unknown, 2) if median_unknown is not None else None
+                ),
+            }
         )
 
     except Exception as e:
         return f"An error occurred: {e}", 500
     finally:
         db.close()
-
-
 
 
 if __name__ == "__main__":
