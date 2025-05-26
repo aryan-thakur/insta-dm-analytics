@@ -1,48 +1,17 @@
 from datetime import datetime
 import statistics
-from flask import Flask, render_template_string, request, jsonify
-from sqlalchemy import create_engine, func
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, Integer, Text, DateTime, Boolean, String
+from flask import Blueprint, render_template_string, request, jsonify
+from sqlalchemy import func
 import plotly.graph_objs as go
 import plotly.io as pio
 import pandas as pd
-import os
+from backend.config import SessionLocal
+from backend.models import Message
 
-app = Flask(__name__)
-
-# --- Database Configuration ---
-DATABASE_FILENAME = os.environ.get(
-    "DATABASE_FILENAME", "instagram_messages.db"
-)  # Default if env var is not set
-DATABASE_PATH = os.path.join("/app", DATABASE_FILENAME)  # Path inside the container
-DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+v1 = Blueprint("v1", __name__)
 
 
-# --- Database Model ---
-class Message(Base):
-    __tablename__ = "messages"
-
-    id = Column(Integer, primary_key=True, index=True)
-    conversation_username = Column(Text)
-    sender = Column(Text)
-    message = Column(Text)
-    timestamp_iso_dt = Column(String)  # Add the timestamp_iso column
-    story_reply = Column(Text)
-    liked = Column(Boolean)
-    timestamp_liked = Column(DateTime)
-    attachment = Column(Text)
-    attachment_link = Column(Text)
-    reference_account = Column(Text)
-    audio = Column(Boolean)
-    photo = Column(Boolean)
-    video = Column(Boolean)
-
-
-@app.route("/message_volume")
+@v1.route("/message_volume")
 def message_volume():
     """
     Displays a Plotly graph of message volume per month, filterable by username.
@@ -99,7 +68,7 @@ def message_volume():
         db.close()
 
 
-@app.route("/message_comparison")
+@v1.route("/message_comparison")
 def message_comparison():
     """
     Displays a Plotly pie chart comparing the proportion of messages
@@ -180,7 +149,7 @@ def message_comparison():
         db.close()
 
 
-@app.route("/average_response_time")
+@v1.route("/average_response_time")
 def average_response_time():
     """
     Calculates and displays the average response time for a given conversation and date.
@@ -276,9 +245,3 @@ def average_response_time():
         return f"An error occurred: {e}", 500
     finally:
         db.close()
-
-
-if __name__ == "__main__":
-    # You can run this simple app using `python your_file_name.py`
-    # It will be accessible at http://127.0.0.1:5000/message_volume
-    app.run(host="0.0.0.0", port=5234, debug=True)
