@@ -498,11 +498,10 @@ def secret_message():
     hash1 = hash_string(secret)
     hash2 = hash_string(os.environ.get("SECRET"))
 
-    secret_path = "/var/render/secrets/my_secret.key"
-    with open(secret_path, "r") as f:
-        secret_data = f.read()
-
     if hash1 == hash2:
+        secret_path = "/etc/secrets/my_secret.key"
+        with open(secret_path, "r") as f:
+            secret_data = f.read()
         return (
             jsonify(
                 {
