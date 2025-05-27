@@ -10,7 +10,7 @@ class Message(Base):
     conversation_username = Column(Text)
     sender = Column(Text)
     message = Column(Text)
-    timestamp_iso_dt = Column(String)  # Add the timestamp_iso column
+    timestamp_iso_dt = Column(DateTime(timezone=False))  # Add the timestamp_iso column
     story_reply = Column(Text)
     liked = Column(Boolean)
     timestamp_liked = Column(DateTime)

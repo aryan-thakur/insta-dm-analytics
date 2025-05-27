@@ -19,7 +19,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 #    Make sure you have a .dockerignore file to avoid copying unnecessary things.
 COPY src/backend ./backend
 
+EXPOSE 5234
+
 # 7. Default command (optional): What runs when the container starts *if not overridden*
 #    For development, it's often better to override this in docker-compose.yml
 #    or use 'docker-compose run' or 'docker-compose exec'.
-CMD gunicorn -w 4 -b 0.0.0.0:$PORT backend.main:app
+CMD ["python3", "-m", "backend.main"]

@@ -1,14 +1,13 @@
 from datetime import datetime
 import statistics
-from flask import Blueprint, render_template_string, request, jsonify
+from flask import Blueprint, request, jsonify
 from sqlalchemy import func
 import plotly.graph_objs as go
-import plotly.io as pio
 import pandas as pd
 from collections import Counter
 from backend.config import SessionLocal
 from backend.models import Message
-from sqlalchemy import or_, and_
+from sqlalchemy import or_
 
 v1 = Blueprint("v1", __name__)
 
@@ -46,22 +45,12 @@ def message_volume():
             yaxis_title="Number of Messages",
         )
 
-        graph_html = pio.to_html(fig, full_html=False)
-
-        return render_template_string(
-            """
-            <h1>Message Volume Analysis</h1>
-            <form action="" method="get">
-                <label for="username">Filter by Username:</label>
-                <input type="text" id="username" name="username" value="{{ username }}">
-                <input type="submit" value="Filter">
-            </form>
-            <div>
-                {{ graph_html | safe }}
-            </div>
-        """,
-            graph_html=graph_html,
-            username=username_filter,
+        return jsonify(
+            {
+                "title": "Message Volume Analysis",
+                "username_filter": username_filter,
+                "figure": fig.to_plotly_json(),
+            }
         )
 
     except Exception as e:
@@ -96,10 +85,10 @@ def word_cloud():
         # Exclude messages that are reactions, have attachments, or are audio/photo/video
         query = query.filter(
             ~Message.message.like("Reacted % to your message"),
-            or_(Message.attachment.is_(None), Message.attachment != 1),
-            or_(Message.audio.is_(False), Message.audio.is_(None)),
-            or_(Message.photo.is_(False), Message.photo.is_(None)),
-            or_(Message.video.is_(False), Message.video.is_(None)),
+            or_(Message.attachment.is_(None), Message.attachment.isnot(True)),
+            or_(Message.audio.is_(None), Message.audio.is_(False)),
+            or_(Message.photo.is_(None), Message.photo.is_(False)),
+            or_(Message.video.is_(None), Message.video.is_(False)),
         )
 
         messages = query.all()
@@ -235,7 +224,7 @@ def message_volume_by_period():
 
         for message in messages:
             try:
-                timestamp = datetime.fromisoformat(message.timestamp_iso_dt)
+                timestamp = message.timestamp_iso_dt
                 hour = timestamp.hour
                 sender = message.sender
 
@@ -276,22 +265,16 @@ def message_volume_by_period():
             yaxis_title="Number of Messages",
         )
 
-        graph_html = pio.to_html(fig, full_html=False)
-
-        return render_template_string(
-            """
-            <h1>Message Volume by Period Analysis</h1>
-            <p>Analyzing messages for username "{{ username }}" from {{ start_date }} to {{ end_date }}.</p>
-            <div>
-                {{ graph_html | safe }}
-            </div>
-            <pre>{{ volume_data | tojson(indent=2) }}</pre>
-            """,
-            graph_html=graph_html,
-            username=username_filter,
-            start_date=start_date_str,
-            end_date=end_date_str,
-            volume_data=volume_by_period,
+        return jsonify(
+            {
+                "title": "Message Volume by Period Analysis",
+                "description": f'Analyzing messages for username "{username_filter}" from {start_date_str} to {end_date_str}.',
+                "username": username_filter,
+                "start_date": start_date_str,
+                "end_date": end_date_str,
+                "figure": fig.to_plotly_json(),  # Use this instead of HTML!
+                "volume_data": volume_by_period,  # This is your raw backend data, JSON-serializable
+            }
         )
 
     except Exception as e:
@@ -358,21 +341,16 @@ def message_comparison():
             title=f'Message Proportion for "{conversation_username if conversation_username != "all" else "All Conversations"}"<br>({start_date_str} to {end_date_str})',
         )
 
-        # Convert to HTML
-        graph_html = pio.to_html(fig, full_html=False)
-
-        return render_template_string(
-            """
-            <h1>Message Proportion Analysis</h1>
-            <p>Analyzing messages in conversation "{{ username }}" from {{ start_date }} to {{ end_date }}.</p>
- <div>
-            {{ graph_html | safe }}
- </div>
-            """,
-            graph_html=graph_html,
-            username=conversation_username,
-            start_date=start_date_str,
-            end_date=end_date_str,
+        fig_json = fig.to_plotly_json()
+        return jsonify(
+            {
+                "figure": fig_json,
+                "meta": {
+                    "username": conversation_username,
+                    "start_date": start_date_str,
+                    "end_date": end_date_str,
+                },
+            }
         )
 
     except Exception as e:
@@ -419,7 +397,7 @@ def average_response_time():
             if ts is None or sender is None:
                 continue
             try:
-                cur_time = datetime.fromisoformat(ts)
+                cur_time = ts
             except Exception:
                 continue
 

@@ -1,7 +1,6 @@
-beautifulsoup4
+gunicorn
+psycopg2-binary>=2.9
 flask
 plotly
-lxml           # Recommended parser for BeautifulSoup
 sqlalchemy     # Good ORM for database interaction (better than raw sqlite3)
 pandas         # Essential for data analysis later
-# Add other libraries as needed, e.g., nltk, matplotlib, jupyterlab
