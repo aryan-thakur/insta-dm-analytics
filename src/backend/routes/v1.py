@@ -1,13 +1,13 @@
-from datetime import datetime
+import hashlib
+import os
 import statistics
 from flask import Blueprint, request, jsonify
-from sqlalchemy import func
+from sqlalchemy import func, or_
 import plotly.graph_objs as go
 import pandas as pd
 from collections import Counter
 from backend.config import SessionLocal
 from backend.models import Message, Conversation
-from sqlalchemy import or_
 
 v1 = Blueprint("v1", __name__)
 
@@ -25,6 +25,10 @@ def get_username_by_id(db, conversation_id):
     if conversation:
         return conversation.username
     return None
+
+
+def hash_string(s):
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
 @v1.route("/message_volume")
@@ -141,9 +145,6 @@ def word_cloud():
                 "i",
                 "you",
                 "he",
-                "reacted",
-                "message",
-                "sent",
                 "she",
                 "it",
                 "we",
@@ -480,6 +481,58 @@ def conversation_count():
     try:
         count = db.query(Conversation).count()
         return jsonify({"conversation_count": count})
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+    finally:
+        db.close()
+
+
+@v1.route("/secret_message")
+def secret_message():
+    """
+    Classified
+    """
+    secret = request.args.get("secret")
+    secret = secret.strip() if secret else ""
+    secret = secret.lower() if secret else ""
+    hash1 = hash_string(secret)
+    hash2 = hash_string(os.environ.get("SECRET"))
+
+    secret_path = "/var/render/secrets/my_secret.key"
+    with open(secret_path, "r") as f:
+        secret_data = f.read()
+
+    if hash1 == hash2:
+        return (
+            jsonify(
+                {
+                    "message": "Well done, did you brute force this, or was it actually the intended recepient? Either way, here's your secret message",
+                    "base64": secret_data,
+                }
+            ),
+            200,
+        )
+    else:
+        return jsonify({"message": "Access denied. Invalid secret."}), 403
+
+
+@v1.route("/username_exists")
+def username_exists():
+    """
+    Checks if the given username exists in the Conversation table.
+    Returns {"exists": true/false, "secret": true/false}.
+    """
+    username = request.args.get("username")
+    if not username:
+        return jsonify({"error": "Missing 'username' query parameter."}), 400
+    db = SessionLocal()
+    try:
+        row = db.query(Conversation).filter(Conversation.username == username).first()
+        exists = row is not None
+        secret = False
+        if exists and row.id in (16, 29):
+            secret = True
+        return jsonify({"exists": exists, "secret": secret})
     except Exception as e:
         return f"An error occurred: {e}", 500
     finally:

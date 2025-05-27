@@ -1,22 +1,16 @@
 version: "3.8" # Specify Compose file version
 
 services:
-  app: # Define a service named 'app'
-    build: . # Build the image using the Dockerfile in the current directory (.)
-    ports: # Map port 5000 on the host to port 5000 in the container
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
       - "5234:5234"
     env_file:
       - .env
-    container_name: instagram_analyzer_app # Give the container a specific name
-    working_dir: /app # Set the working directory for commands run in this service
+    container_name: instagram_analyzer_dev
+    working_dir: /app
     volumes:
-      # Mount the current host directory (.) into /app inside the container
-      # This allows:
-      # 1. Code changes on your host machine to be reflected inside the container immediately.
-      # 2. Files created inside /app in the container (like the SQLite DB) to persist on the host.
       - .:/app
-    # Keep the container running. 'tail -f /dev/null' is a common trick for development
-    # containers so you can use 'docker-compose exec' to run commands inside it.
-    # Alternatively, you could specify a default command to run, like:
-    # command: python src/your_parser.py
     command: tail -f /dev/null
