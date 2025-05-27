@@ -6,19 +6,38 @@ import plotly.graph_objs as go
 import pandas as pd
 from collections import Counter
 from backend.config import SessionLocal
-from backend.models import Message
+from backend.models import Message, Conversation
 from sqlalchemy import or_
 
 v1 = Blueprint("v1", __name__)
 
 
+def get_username_by_id(db, conversation_id):
+    """
+    Helper function to get username from Conversation by id.
+    Returns username if found, else None.
+    """
+    if not conversation_id:
+        return None
+    conversation = (
+        db.query(Conversation).filter(Conversation.id == int(conversation_id)).first()
+    )
+    if conversation:
+        return conversation.username
+    return None
+
+
 @v1.route("/message_volume")
 def message_volume():
     """
-    Displays a Plotly graph of message volume per month, filterable by username.
+    Displays a Plotly graph of message volume per month, filterable by conversation id.
     """
     db = SessionLocal()
-    username_filter = request.args.get("username")  # Get username from query parameter
+
+    conversation_id = request.args.get("id")  # Get id from query parameter
+    username_filter = get_username_by_id(db, conversation_id)
+    if conversation_id and not username_filter:
+        return f"Conversation with id {conversation_id} not found.", 404
 
     try:
         query = db.query(
@@ -28,7 +47,7 @@ def message_volume():
             func.count().label("message_count"),
         ).group_by("month")
 
-        if username_filter and username_filter != "all":
+        if username_filter:
             query = query.filter(Message.conversation_username == username_filter)
 
         results = query.all()
@@ -48,7 +67,6 @@ def message_volume():
         return jsonify(
             {
                 "title": "Message Volume Analysis",
-                "username_filter": username_filter,
                 "figure": fig.to_plotly_json(),
             }
         )
@@ -62,16 +80,17 @@ def message_volume():
 @v1.route("/word_cloud")
 def word_cloud():
     """
-    Analyzes messages for a given username and date range to find the most frequent words.
+    Analyzes messages for a given conversation id and date range to find the most frequent words.
     """
     db = SessionLocal()
-    username = request.args.get("username")
+    conversation_id = request.args.get("id")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
+    username = get_username_by_id(db, conversation_id)
 
     if not username or not start_date_str or not end_date_str:
         return (
-            "Please provide 'username', 'start_date', and 'end_date' parameters.",
+            "Please provide 'id', 'start_date', and 'end_date' parameters.",
             400,
         )
 
@@ -191,17 +210,17 @@ def word_cloud():
 @v1.route("/message_volume_by_period")
 def message_volume_by_period():
     """
-    Calculates and displays the message volume by time period for a given
-    username and date range.
+    Calculates and displays the message volume by time period for a given conversation id and date range.
     """
     db = SessionLocal()
-    username_filter = request.args.get("username")
+    conversation_id = request.args.get("id")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
+    username_filter = get_username_by_id(db, conversation_id)
 
     if not username_filter or not start_date_str or not end_date_str:
         return (
-            "Please provide 'username', 'start_date', and 'end_date' parameters.",
+            "Please provide 'id', 'start_date', and 'end_date' parameters.",
             400,
         )
 
@@ -269,7 +288,6 @@ def message_volume_by_period():
             {
                 "title": "Message Volume by Period Analysis",
                 "description": f'Analyzing messages for username "{username_filter}" from {start_date_str} to {end_date_str}.',
-                "username": username_filter,
                 "start_date": start_date_str,
                 "end_date": end_date_str,
                 "figure": fig.to_plotly_json(),  # Use this instead of HTML!
@@ -290,22 +308,22 @@ def message_comparison():
     sent by "self" and "unknown" within a conversation and date range.
     """
     db = SessionLocal()
-    conversation_username = request.args.get("username")
+    conversation_id = request.args.get("id")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
+    username_filter = get_username_by_id(db, conversation_id)
 
-    if not conversation_username:
+    if not username_filter:
         return (
-            "Please provide 'username', 'start_date', and 'end_date' parameters.",
+            "Please provide 'id', 'start_date', and 'end_date' parameters.",
             400,
         )
 
     try:
         # Base query filtered by conversation and date range
-        # Initialize base query
         query = db.query(Message)
-        if conversation_username and conversation_username != "all":
-            query = query.filter(Message.conversation_username == conversation_username)
+        if username_filter:
+            query = query.filter(Message.conversation_username == username_filter)
         if start_date_str:
             query = query.filter(Message.timestamp_iso_dt >= start_date_str)
         if end_date_str:
@@ -338,7 +356,7 @@ def message_comparison():
 
         # Update layout
         fig.update_layout(
-            title=f'Message Proportion for "{conversation_username if conversation_username != "all" else "All Conversations"}"<br>({start_date_str} to {end_date_str})',
+            title=f'Message Proportion for "{username_filter}"<br>({start_date_str} to {end_date_str})',
         )
 
         fig_json = fig.to_plotly_json()
@@ -346,7 +364,6 @@ def message_comparison():
             {
                 "figure": fig_json,
                 "meta": {
-                    "username": conversation_username,
                     "start_date": start_date_str,
                     "end_date": end_date_str,
                 },
@@ -364,24 +381,22 @@ def average_response_time():
     """
     Calculates and displays the average response time for a given conversation and date.
     """
-    # Get query parameters
-    conversation_username = request.args.get("username")
+    conversation_id = request.args.get("id")
     start_str = request.args.get("start_date")
     end_str = request.args.get("end_date")
-
+    db = SessionLocal()
+    username_filter = get_username_by_id(db, conversation_id)
     start_dt = start_str if start_str else "Start date not provided"
     end_dt = end_str if end_str else "End date not provided"
 
-    if not conversation_username or not start_str or not end_str:
+    if not username_filter or not start_str or not end_str:
         return "Missing required query parameters", 400
 
-    db = SessionLocal()
     try:
-        # Compare as strings because the column is String
         messages = (
             db.query(Message.timestamp_iso_dt, Message.sender)
             .filter(
-                Message.conversation_username == conversation_username,
+                Message.conversation_username == username_filter,
                 Message.timestamp_iso_dt >= start_str,
                 Message.timestamp_iso_dt <= end_str,
             )
@@ -435,7 +450,6 @@ def average_response_time():
 
         return jsonify(
             {
-                "conversation_username": conversation_username,
                 "start_dt": start_dt,
                 "end_dt": end_dt,
                 "avg_self": round(avg_self, 2) if avg_self is not None else None,
@@ -451,6 +465,21 @@ def average_response_time():
             }
         )
 
+    except Exception as e:
+        return f"An error occurred: {e}", 500
+    finally:
+        db.close()
+
+
+@v1.route("/conversation_count")
+def conversation_count():
+    """
+    Returns the number of rows in the Conversation table.
+    """
+    db = SessionLocal()
+    try:
+        count = db.query(Conversation).count()
+        return jsonify({"conversation_count": count})
     except Exception as e:
         return f"An error occurred: {e}", 500
     finally:
