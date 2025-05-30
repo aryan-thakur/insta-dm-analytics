@@ -45,9 +45,7 @@ def message_volume():
 
     try:
         query = db.query(
-            func.strftime("%Y-%m", Message.timestamp_iso_dt).label(
-                "month"
-            ),  # Use timestamp_iso
+            func.to_char(Message.timestamp_iso_dt, "YYYY-MM").label("month"),
             func.count().label("message_count"),
         ).group_by("month")
 
@@ -59,11 +57,15 @@ def message_volume():
         # Convert results to a pandas DataFrame for easier Plotly plotting
         df = pd.DataFrame(results, columns=["month", "message_count"])
         df["month"] = pd.to_datetime(df["month"])
+        # Extract month name from the 'month' column (e.g., "May" from "Mon, May 01 2025, 00:00:00 GMT")
         df = df.sort_values("month")
+        df["month"] = df["month"].dt.strftime("%b %y")
 
-        fig = go.Figure(data=[go.Bar(x=df["month"], y=df["message_count"])])
+        fig = go.Figure(
+            data=[go.Bar(x=df["month"].tolist(), y=df["message_count"].tolist())]
+        )
         fig.update_layout(
-            title=f'Message Volume Per Month{" for " + username_filter if username_filter else ""}',
+            title="Message Volume Per Month",
             xaxis_title="Month",
             yaxis_title="Number of Messages",
         )
@@ -90,7 +92,11 @@ def word_cloud():
     conversation_id = request.args.get("id")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
+    min_letters = request.args.get("letters", 0, type=int)
     username = get_username_by_id(db, conversation_id)
+
+    if min_letters >= 6:
+        min_letters = 5
 
     if not username or not start_date_str or not end_date_str:
         return (
@@ -108,6 +114,7 @@ def word_cloud():
         # Exclude messages that are reactions, have attachments, or are audio/photo/video
         query = query.filter(
             ~Message.message.like("Reacted % to your message"),
+            or_(Message.story_reply.is_(False)),
             or_(Message.attachment.is_(None), Message.attachment.isnot(True)),
             or_(Message.audio.is_(None), Message.audio.is_(False)),
             or_(Message.photo.is_(None), Message.photo.is_(False)),
@@ -189,7 +196,9 @@ def word_cloud():
 
         # Filter out stop words and punctuation
         filtered_words = [
-            word for word in words if word not in stop_words and word.isalnum()
+            word
+            for word in words
+            if word not in stop_words and word.isalnum() and len(word) >= min_letters
         ]
 
         # Count word frequencies
@@ -217,6 +226,7 @@ def message_volume_by_period():
     conversation_id = request.args.get("id")
     start_date_str = request.args.get("start_date")
     end_date_str = request.args.get("end_date")
+    timezone = request.args.get("timezone", "pst")
     username_filter = get_username_by_id(db, conversation_id)
 
     if not username_filter or not start_date_str or not end_date_str:
@@ -245,7 +255,19 @@ def message_volume_by_period():
         for message in messages:
             try:
                 timestamp = message.timestamp_iso_dt
+                # Adjust hour based on timezone
                 hour = timestamp.hour
+                minute = timestamp.minute
+                if timezone.lower() == "ist":
+                    # IST is 12.5 hours ahead of PST
+                    total_minutes = hour * 60 + minute + 750  # 12*60 + 30 = 750
+                    hour = (total_minutes // 60) % 24
+                    minute = total_minutes % 60
+                elif timezone.lower() == "est":
+                    # EST is 3 hours ahead of PST
+                    total_minutes = hour * 60 + minute + 180  # 3*60 = 180
+                    hour = (total_minutes // 60) % 24
+                    minute = total_minutes % 60
                 sender = message.sender
 
                 if 0 <= hour < 6:
@@ -274,13 +296,13 @@ def message_volume_by_period():
 
         fig = go.Figure(
             data=[
-                go.Bar(name="Self", x=periods, y=self_volumes),
-                go.Bar(name="Unknown", x=periods, y=unknown_volumes),
+                go.Bar(name="Aryan", x=periods, y=self_volumes),
+                go.Bar(name="User", x=periods, y=unknown_volumes),
             ]
         )
         fig.update_layout(
             barmode="group",
-            title=f'Message Volume by Period for "{username_filter}"<br>({start_date_str} to {end_date_str})',
+            title=f"Message Volume by Period",
             xaxis_title="Time Period",
             yaxis_title="Number of Messages",
         )
@@ -288,7 +310,6 @@ def message_volume_by_period():
         return jsonify(
             {
                 "title": "Message Volume by Period Analysis",
-                "description": f'Analyzing messages for username "{username_filter}" from {start_date_str} to {end_date_str}.',
                 "start_date": start_date_str,
                 "end_date": end_date_str,
                 "figure": fig.to_plotly_json(),  # Use this instead of HTML!
@@ -339,7 +360,7 @@ def message_comparison():
         if total_messages == 0:
             return "No messages found for the specified criteria.", 404
 
-        labels = ["Self", "Unknown"]
+        labels = ["Aryan", "User"]
         values = [self_count, unknown_count]
 
         # Create a pie chart
@@ -357,7 +378,7 @@ def message_comparison():
 
         # Update layout
         fig.update_layout(
-            title=f'Message Proportion for "{username_filter}"<br>({start_date_str} to {end_date_str})',
+            title=f"Message Proportion",
         )
 
         fig_json = fig.to_plotly_json()
@@ -432,15 +453,9 @@ def average_response_time():
         ]
 
         # Median includes all values
-        median_self = (
-            statistics.median(response_durations["self"])
-            if response_durations["self"]
-            else None
-        )
+        median_self = statistics.median(filtered_self) if filtered_self else None
         median_unknown = (
-            statistics.median(response_durations["unknown"])
-            if response_durations["unknown"]
-            else None
+            statistics.median(filtered_unknown) if filtered_unknown else None
         )
 
         # Average (mean), excluding outliers
